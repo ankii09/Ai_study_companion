@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: myai-studybloom-api
+    runtime: node
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: gemini-3.8-flash
+      - key: FRONTEND_URL
+        value: https://ankii09.github.io
