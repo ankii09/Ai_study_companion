@@ -303,6 +303,7 @@ async function openChatStream(args: GenerateArgs, model: string, withThinking: b
 
 async function* streamWithModelFallback(args: GenerateArgs): AsyncGenerator<unknown> {
   let lastError: unknown
+  let lastRetryableStatus = 0
 
   for (const model of modelCandidates()) {
     for (const withThinking of [true, false]) {
@@ -320,10 +321,26 @@ async function* streamWithModelFallback(args: GenerateArgs): AsyncGenerator<unkn
         lastError = error
         if (receivedOutput) throw error
         if (withThinking && isThinkingConfigError(error)) continue
-        if (isInvalidModelError(error) || getTemporaryProviderStatus(error) === 503) break
+        const providerStatus = getTemporaryProviderStatus(error)
+        if (isInvalidModelError(error) || providerStatus === 429 || providerStatus === 503) {
+          if (providerStatus === 429 || (providerStatus === 503 && lastRetryableStatus !== 429)) {
+            lastRetryableStatus = providerStatus
+          }
+          break
+        }
         throw error
       }
     }
+  }
+
+  if (lastRetryableStatus === 429) {
+    throw new AiServiceError(
+      'Gemini rate limit or quota reached for the configured and fallback models. Wait and try again, or check your Google AI Studio usage and quota.',
+      429,
+    )
+  }
+  if (lastRetryableStatus === 503) {
+    throw new AiServiceError('Gemini is temporarily busy across the available models. Please try again shortly.', 503)
   }
 
   throw lastError instanceof Error ? lastError : new Error('Gemini request failed.')
