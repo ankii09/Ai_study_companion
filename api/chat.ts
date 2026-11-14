@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { chatRequestSchema } from '../backend/src/middleware/schema.js'
-import { getCorsOrigin } from '../backend/src/config/origins.js'
-import { AiServiceError, generateChatResponse } from '../backend/src/services/ai.js'
+import { chatRequestSchema } from '../backend/dist/middleware/schema.js'
+import { getCorsOrigin } from '../backend/dist/config/origins.js'
+import { AiServiceError, generateChatResponse } from '../backend/dist/services/ai.js'
 
 export const config = {
   runtime: 'nodejs',

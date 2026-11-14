@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { getCorsOrigin } from '../backend/src/config/origins.js'
-import { env } from '../backend/src/config/env.js'
+import { getCorsOrigin } from '../backend/dist/config/origins.js'
+import { env } from '../backend/dist/config/env.js'
 
 export const config = {
   runtime: 'nodejs',

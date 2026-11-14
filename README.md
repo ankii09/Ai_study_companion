@@ -117,7 +117,7 @@ Vercel hosts the React app and the `/api/chat` function from one project. Do not
 4. Confirm the project settings (`vercel.json` already sets these):
    - **Root Directory:** leave empty (repository root)
    - **Framework Preset:** Other
-   - **Build Command:** `npm run build --workspace frontend`
+   - **Build Command:** `npm run build:all`
    - **Output Directory:** `frontend/dist`
    - **Install Command:** `npm ci`
    - **Node.js Version:** 22
