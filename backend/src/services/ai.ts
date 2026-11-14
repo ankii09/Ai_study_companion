@@ -285,47 +285,42 @@ type GenerateArgs = {
   abortSignal?: AbortSignal
 }
 
-async function openChatStream(args: GenerateArgs, model: string) {
+async function openChatStream(args: GenerateArgs, model: string, withThinking: boolean) {
   const client = getGoogleClient()
-
-  for (const withThinking of [true, false]) {
-    try {
-      return await client.models.generateContentStream({
-        model,
-        contents: args.contents,
-        config: {
-          systemInstruction: args.systemPrompt,
-          maxOutputTokens: 2048,
-          temperature: 0.7,
-          tools: [{ functionDeclarations: taskToolDeclarations }],
-          ...(withThinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } } : {}),
-          ...(args.abortSignal ? { abortSignal: args.abortSignal } : {}),
-        },
-      })
-    } catch (error) {
-      if (withThinking && isThinkingConfigError(error)) continue
-      throw error
-    }
-  }
-
-  throw new Error('Gemini request failed.')
+  return client.models.generateContentStream({
+    model,
+    contents: args.contents,
+    config: {
+      systemInstruction: args.systemPrompt,
+      maxOutputTokens: 2048,
+      temperature: 0.7,
+      tools: [{ functionDeclarations: taskToolDeclarations }],
+      ...(withThinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } } : {}),
+      ...(args.abortSignal ? { abortSignal: args.abortSignal } : {}),
+    },
+  })
 }
 
 async function* streamWithModelFallback(args: GenerateArgs): AsyncGenerator<unknown> {
   let lastError: unknown
 
   for (const model of modelCandidates()) {
-    let receivedChunk = false
-    try {
-      const stream = await openChatStream(args, model)
-      for await (const chunk of stream) {
-        receivedChunk = true
-        yield chunk
-      }
-      return
-    } catch (error) {
-      lastError = error
-      if (receivedChunk || (!isInvalidModelError(error) && getTemporaryProviderStatus(error) !== 503)) {
+    for (const withThinking of [true, false]) {
+      let receivedOutput = false
+      try {
+        const stream = await openChatStream(args, model, withThinking)
+        for await (const chunk of stream) {
+          if (extractChunkText(chunk) || getFunctionCalls(chunk).length > 0) {
+            receivedOutput = true
+          }
+          yield chunk
+        }
+        return
+      } catch (error) {
+        lastError = error
+        if (receivedOutput) throw error
+        if (withThinking && isThinkingConfigError(error)) continue
+        if (isInvalidModelError(error) || getTemporaryProviderStatus(error) === 503) break
         throw error
       }
     }
