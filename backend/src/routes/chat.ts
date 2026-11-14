@@ -1,7 +1,8 @@
 import { Router } from 'express'
+import type { ChatStreamEvent } from '../services/ai.js'
 import { AiServiceError, generateChatResponse } from '../services/ai.js'
 import { validateChatRequest } from '../middleware/validate.js'
-import type { ChatRequest } from '../types/chat.js'
+import type { ParsedChatRequest } from '../middleware/validate.js'
 import { logError, logInfo } from '../utils/logger.js'
 
 export const chatRouter = Router()
@@ -45,8 +46,12 @@ function getSafeProviderMessage(error: unknown, statusCode: number): string {
   return 'Something went wrong. Please try again.'
 }
 
+function writeEvent(res: { write: (chunk: string) => boolean }, event: ChatStreamEvent) {
+  res.write(`${JSON.stringify(event)}\n`)
+}
+
 chatRouter.post('/api/chat', validateChatRequest, async (req, res) => {
-  const request = req.body as ChatRequest
+  const request = req.body as ParsedChatRequest
   const sanitizedMessages = request.messages.map((message) => ({
     role: message.role,
     content: message.content.trim(),
@@ -59,9 +64,12 @@ chatRouter.post('/api/chat', validateChatRequest, async (req, res) => {
   try {
     let streamed = false
 
-    for await (const chunk of generateChatResponse(sanitizedMessages, abortController.signal)) {
+    for await (const event of generateChatResponse(sanitizedMessages, abortController.signal, {
+      tasks: request.tasks,
+      context: request.context,
+    })) {
       if (!streamed) {
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+        res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
         res.setHeader('Cache-Control', 'no-cache, no-transform')
         res.setHeader('Connection', 'keep-alive')
         res.setHeader('X-Accel-Buffering', 'no')
@@ -69,7 +77,7 @@ chatRouter.post('/api/chat', validateChatRequest, async (req, res) => {
         streamed = true
       }
 
-      if (!res.write(chunk)) {
+      if (!res.write(`${JSON.stringify(event)}\n`)) {
         await new Promise<void>((resolve) => res.once('drain', resolve))
       }
     }
@@ -88,7 +96,8 @@ chatRouter.post('/api/chat', validateChatRequest, async (req, res) => {
     const errorMessage = error instanceof Error ? `: ${error.message}` : ''
     logError(`chat request failed: ${errorName} (provider status ${statusCode})${errorMessage}`)
     if (res.headersSent) {
-      res.end('\n\nSomething went wrong. Please try again.')
+      writeEvent(res, { type: 'text', delta: '\n\nSomething went wrong. Please try again.' })
+      res.end()
     } else {
       res.status(statusCode).json({ error: getSafeProviderMessage(error, statusCode) })
     }

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "description": "AI-powered chatbot with a Node.js backend and React frontend",
   "workspaces": [
@@ -15,9 +15,15 @@
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev -- --host 0.0.0.0",
     "build": "npm --prefix backend run build",
+    "build:frontend": "npm run build --workspace frontend",
     "build:all": "npm --prefix backend run build && npm --prefix frontend run build",
     "start": "npm --prefix backend run start",
     "preview": "npm --prefix frontend run preview -- --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@google/genai": "^2.30.0",
+    "dotenv": "^16.4.7",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

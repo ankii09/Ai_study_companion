@@ -1,14 +1,16 @@
 # myai
 
-A full-stack AI chat and study-planning workspace built for students. Ask questions in a streamed AI conversation, organize small daily tasks, check in on study habits, and plan sessions across the week.
+A full-stack AI chat and task workspace built for students. Ask questions in a streamed AI conversation, let the assistant create and update real tasks, check in on study habits, and plan sessions across the week.
 
 ## Features
 
 - **Streaming AI chat:** responses appear as they are generated, with Markdown rendering, copy controls, and stop generation.
-- **Study dashboard:** add, complete, and remove to-dos; track daily study habits; create and remove subject-based sessions in a weekly timetable.
+- **Accurate task manager:** add, complete, reschedule, and filter tasks by today, overdue, and done. Chat uses Gemini tool calls against the same list, so the model cannot pretend a task changed.
+- **Study dashboard:** daily habits and a weekly timetable live beside the shared task list.
 - **No account required:** conversations, preferences, tasks, habits, and timetable entries are stored in this browser using local storage.
 - **Server-side AI credentials:** the Google Gemini API key is read by the backend and is never included in the frontend bundle.
-- **Validated API:** Express routes validate chat input and expose a health endpoint.
+- **Vercel-ready API:** `/api/chat` and `/api/health` deploy as Node functions next to the static frontend.
+- **Validated API:** requests are validated with Zod before they reach Gemini.
 - **Responsive interface:** works across desktop and mobile layouts.
 
 ## Tech Stack
@@ -22,12 +24,13 @@ A full-stack AI chat and study-planning workspace built for students. Ask questi
 
 ```text
 Browser (React)
-  ├── Chat and study planner state saved in localStorage
-  └── POST /api/chat
-        ↓ streamed response
-Express API (port 3001)
+  ├── Chat, tasks, habits, and timetable saved in localStorage
+  └── POST /api/chat  (messages + current task snapshot)
+        ↓ NDJSON stream (text + task snapshot)
+API (local Express or Vercel /api)
   ├── validates requests
-  └── calls Google Gemini with the server-side API key
+  ├── Gemini function calls mutate an in-memory copy of the task list
+  └── returns the reply and the updated tasks
 ```
 
 Chat prompts are sent to Google Gemini through the backend. Local storage is specific to this browser and is not synced or backed up. Avoid entering sensitive personal information. Clearing this browser's site data removes locally saved conversations and planner data.
@@ -57,7 +60,7 @@ chatbot/
 
 ## Run Locally
 
-Prerequisites: Node.js 20 or newer and a Google Gemini API key.
+Prerequisites: Node.js 22 or newer and a Google Gemini API key.
 
 1. Install dependencies from the project root:
 
@@ -111,24 +114,24 @@ Vercel hosts the React app and the `/api/chat` function from one project. Do not
 1. Push this repo to GitHub if it is not already there.
 2. Open [vercel.com](https://vercel.com), sign in with GitHub, and click **Add New → Project**.
 3. Import this repository.
-4. Confirm the project settings:
+4. Confirm the project settings (`vercel.json` already sets these):
    - **Root Directory:** leave empty (repository root)
    - **Framework Preset:** Other
-   - **Build Command:** `npm run build && npm run build --workspace frontend`
+   - **Build Command:** `npm run build --workspace frontend`
    - **Output Directory:** `frontend/dist`
-   - **Install Command:** `npm install`
+   - **Install Command:** `npm ci`
    - **Node.js Version:** 22
 5. Open **Environment Variables** before the first deploy and add:
 
    | Name | Value |
    | --- | --- |
    | `AI_API_KEY` | your Google Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey) |
-   | `AI_MODEL` | `gemini-3.8-flash` |
+   | `AI_MODEL` | `gemini-3.8-flash` (use this exact id, not the display name) |
    | `FRONTEND_URL` | your Vercel URL, for example `https://your-app.vercel.app` |
 
    Do **not** set `VITE_API_BASE_URL`. The site calls `/api/chat` on the same Vercel domain.
 6. Click **Deploy**.
-7. After it finishes, open `https://YOUR-APP.vercel.app/api/health`. You should see `{"status":"ok","service":"ai-backend"}`.
+7. After it finishes, open `https://YOUR-APP.vercel.app/api/health`. You should see `{"status":"ok","service":"ai-backend","aiConfigured":true}`.
 8. Open the site URL, send a message, and confirm a full reply streams in.
 9. If you use a custom domain later, add that origin as `FRONTEND_URL` and redeploy.
 

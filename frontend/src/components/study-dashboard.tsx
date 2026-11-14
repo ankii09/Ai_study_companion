@@ -1,10 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BookOpen, Check, CheckCircle2, Clock3, Plus, Sparkles, Trash2 } from 'lucide-react'
+import {
+  createTask,
+  deleteTask,
+  formatDueLabel,
+  isDueToday,
+  isOverdue,
+  loadTasks,
+  localToday,
+  patchTask,
+  sortTasks,
+  subscribeTasks,
+  taskStats,
+  type Task,
+  type TaskPriority,
+} from '../lib/tasks'
 
-type StudyTask = { id: string; title: string; done: boolean }
 type StudySession = { id: string; subject: string; day: string; time: string; duration: number }
-type DashboardData = {
-  tasks: StudyTask[]
+type DashboardExtras = {
   sessions: StudySession[]
   habitChecks: Record<string, string[]>
 }
@@ -16,19 +29,22 @@ const habits = [
   { id: 'water', title: 'Take care of you', detail: 'Water, a stretch, a real break' },
 ]
 const storageKey = 'my-ai-study-dashboard'
+type TaskFilter = 'open' | 'today' | 'overdue' | 'done' | 'all'
 
 function todayKey() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  return localToday()
 }
 
-function readDashboard(): DashboardData {
+function weekdayIndex() {
+  return new Date().getDay() === 0 ? 6 : new Date().getDay() - 1
+}
+
+function readExtras(): DashboardExtras {
   try {
     const stored = localStorage.getItem(storageKey)
     if (stored) {
-      const parsed = JSON.parse(stored) as Partial<DashboardData>
+      const parsed = JSON.parse(stored) as Partial<DashboardExtras>
       return {
-        tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
         sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
         habitChecks: parsed.habitChecks && typeof parsed.habitChecks === 'object' ? parsed.habitChecks : {},
       }
@@ -36,49 +52,64 @@ function readDashboard(): DashboardData {
   } catch {
     // Start with an empty planner if saved data is unavailable.
   }
-  return {
-    tasks: [
-      { id: 'task-notes', title: 'Review today\'s lecture notes', done: false },
-      { id: 'task-break', title: 'Plan a proper study break', done: false },
-    ],
-    sessions: [],
-    habitChecks: {},
-  }
+  return { sessions: [], habitChecks: {} }
+}
+
+function matchesFilter(task: Task, filter: TaskFilter, today: string): boolean {
+  if (filter === 'all') return true
+  if (filter === 'done') return task.status === 'done'
+  if (filter === 'open') return task.status !== 'done'
+  if (filter === 'today') return isDueToday(task, today)
+  return isOverdue(task, today)
 }
 
 export function StudyDashboard({ onOpenChat }: { onOpenChat: () => void }) {
-  const [data, setData] = useState(readDashboard)
+  const [tasks, setTasks] = useState<Task[]>(() => sortTasks(loadTasks()))
+  const [extras, setExtras] = useState(readExtras)
   const [taskDraft, setTaskDraft] = useState('')
+  const [dueDraft, setDueDraft] = useState('')
+  const [priorityDraft, setPriorityDraft] = useState<TaskPriority>('medium')
+  const [filter, setFilter] = useState<TaskFilter>('open')
   const [subject, setSubject] = useState('')
-  const [sessionDay, setSessionDay] = useState(days[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1])
+  const [sessionDay, setSessionDay] = useState(days[weekdayIndex()])
   const [sessionTime, setSessionTime] = useState('16:00')
   const [duration, setDuration] = useState('45')
   const date = todayKey()
-  const checkedHabits = data.habitChecks[date] ?? []
-  const completedTasks = data.tasks.filter((task) => task.done).length
-  const todayName = days[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1]
-  const todaySessions = data.sessions.filter((session) => session.day === todayName).length
+  const checkedHabits = extras.habitChecks[date] ?? []
+  const todayName = days[weekdayIndex()]
+  const todaySessions = extras.sessions.filter((session) => session.day === todayName).length
   const dateLabel = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())
-  const progress = data.tasks.length ? Math.round((completedTasks / data.tasks.length) * 100) : 0
+  const stats = taskStats(tasks, date)
+  const progress = stats.total ? Math.round((stats.done / stats.total) * 100) : 0
+  const visibleTasks = useMemo(
+    () => sortTasks(tasks, date).filter((task) => matchesFilter(task, filter, date)),
+    [tasks, filter, date],
+  )
 
   useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(data))
-  }, [data])
+    return subscribeTasks(() => setTasks(sortTasks(loadTasks())))
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify(extras))
+  }, [extras])
 
   function addTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const title = taskDraft.trim()
     if (!title) return
-    setData((current) => ({ ...current, tasks: [...current.tasks, { id: `${Date.now()}-${Math.random()}`, title, done: false }] }))
+    createTask({ title, dueDate: dueDraft || null, priority: priorityDraft })
     setTaskDraft('')
+    setDueDraft('')
+    setPriorityDraft('medium')
   }
 
-  function toggleTask(id: string) {
-    setData((current) => ({ ...current, tasks: current.tasks.map((task) => task.id === id ? { ...task, done: !task.done } : task) }))
+  function toggleTask(task: Task) {
+    patchTask(task.id, { status: task.status === 'done' ? 'todo' : 'done' })
   }
 
   function toggleHabit(id: string) {
-    setData((current) => {
+    setExtras((current) => {
       const checked = current.habitChecks[date] ?? []
       const next = checked.includes(id) ? checked.filter((item) => item !== id) : [...checked, id]
       return { ...current, habitChecks: { ...current.habitChecks, [date]: next } }
@@ -89,7 +120,10 @@ export function StudyDashboard({ onOpenChat }: { onOpenChat: () => void }) {
     event.preventDefault()
     const title = subject.trim()
     if (!title) return
-    setData((current) => ({ ...current, sessions: [...current.sessions, { id: `${Date.now()}-${Math.random()}`, subject: title, day: sessionDay, time: sessionTime, duration: Number(duration) || 45 }] }))
+    setExtras((current) => ({
+      ...current,
+      sessions: [...current.sessions, { id: `${Date.now()}-${Math.random()}`, subject: title, day: sessionDay, time: sessionTime, duration: Number(duration) || 45 }],
+    }))
     setSubject('')
   }
 
@@ -97,19 +131,19 @@ export function StudyDashboard({ onOpenChat }: { onOpenChat: () => void }) {
     <section className="study-dashboard">
       <header className="dashboard-heading">
         <div>
-          <div className="dashboard-kicker"><Sparkles size={13} /> YOUR STUDY NOOK <span>{dateLabel}</span></div>
+          <div className="dashboard-kicker"><Sparkles size={13} /> TASKS & STUDY <span>{dateLabel}</span></div>
           <h1>Make room to learn.</h1>
-          <p>A little structure, a little breathing room. You’ve got this.</p>
+          <p>Chat can add, complete, and update these tasks. Dates stay in your local timezone.</p>
         </div>
         <button className="dashboard-chat-link" type="button" onClick={onOpenChat}><Sparkles size={15} /> Ask myai</button>
       </header>
 
       <div className="dashboard-stats" aria-label="Today's overview">
         <article className="dashboard-stat dashboard-stat-progress">
-          <div className="stat-label">TODAY'S TASKS</div>
-          <div className="stat-value">{completedTasks}<span> / {data.tasks.length}</span></div>
+          <div className="stat-label">OPEN TASKS</div>
+          <div className="stat-value">{stats.done}<span> / {stats.total} done</span></div>
           <div className="stat-progress-track"><span style={{ width: `${progress}%` }} /></div>
-          <small>{data.tasks.length ? `${progress}% of your list is done` : 'Add one small thing to begin'}</small>
+          <small>{stats.overdue ? `${stats.overdue} overdue · ${stats.today} due today` : stats.total ? `${progress}% complete` : 'Add one small thing to begin'}</small>
         </article>
         <article className="dashboard-stat dashboard-stat-habits">
           <div className="stat-label">DAILY CHECK-IN</div>
@@ -126,20 +160,51 @@ export function StudyDashboard({ onOpenChat }: { onOpenChat: () => void }) {
       <div className="dashboard-columns">
         <section className="dashboard-panel task-panel">
           <div className="panel-heading">
-            <div><span className="panel-icon task-icon"><CheckCircle2 size={17} /></span><div><h2>Little to-dos</h2><p>Small steps still move you forward.</p></div></div>
-            <span className="panel-count">{data.tasks.length}</span>
+            <div><span className="panel-icon task-icon"><CheckCircle2 size={17} /></span><div><h2>Task list</h2><p>Due dates and priorities stay accurate across chat.</p></div></div>
+            <span className="panel-count">{stats.open}</span>
           </div>
-          <form className="dashboard-add-form" onSubmit={addTask}>
-            <input aria-label="New task" placeholder="Add something to do..." value={taskDraft} onChange={(event) => setTaskDraft(event.target.value)} maxLength={100} />
+          <form className="dashboard-add-form task-create-form" onSubmit={addTask}>
+            <input aria-label="New task" placeholder="Add a task..." value={taskDraft} onChange={(event) => setTaskDraft(event.target.value)} maxLength={200} />
+            <input aria-label="Due date" type="date" value={dueDraft} onChange={(event) => setDueDraft(event.target.value)} />
+            <select aria-label="Priority" value={priorityDraft} onChange={(event) => setPriorityDraft(event.target.value as TaskPriority)}>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
             <button type="submit" aria-label="Add task" disabled={!taskDraft.trim()}><Plus size={17} /></button>
           </form>
+          <div className="task-filters" role="tablist" aria-label="Filter tasks">
+            {([
+              ['open', 'Open'],
+              ['today', 'Today'],
+              ['overdue', 'Overdue'],
+              ['done', 'Done'],
+              ['all', 'All'],
+            ] as const).map(([id, label]) => (
+              <button key={id} type="button" role="tab" aria-selected={filter === id} className={filter === id ? 'task-filter-active' : ''} onClick={() => setFilter(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
           <ul className="task-list">
-            {data.tasks.map((task) => <li className={task.done ? 'task-done' : ''} key={task.id}>
-              <button className="task-check" type="button" aria-label={task.done ? `Mark ${task.title} incomplete` : `Complete ${task.title}`} onClick={() => toggleTask(task.id)}>{task.done && <Check size={13} />}</button>
-              <span>{task.title}</span>
-              <button className="task-delete" type="button" aria-label={`Delete ${task.title}`} onClick={() => setData((current) => ({ ...current, tasks: current.tasks.filter((item) => item.id !== task.id) }))}><Trash2 size={14} /></button>
-            </li>)}
-            {data.tasks.length === 0 && <li className="dashboard-empty">Your list is clear. Add a task when you’re ready.</li>}
+            {visibleTasks.map((task) => {
+              const overdue = isOverdue(task, date)
+              return (
+                <li className={task.status === 'done' ? 'task-done' : overdue ? 'task-overdue' : ''} key={task.id}>
+                  <button className="task-check" type="button" aria-label={task.status === 'done' ? `Mark ${task.title} incomplete` : `Complete ${task.title}`} onClick={() => toggleTask(task)}>{task.status === 'done' && <Check size={13} />}</button>
+                  <div className="task-copy">
+                    <span>{task.title}</span>
+                    <small>
+                      <em className={`priority-tag priority-${task.priority}`}>{task.priority}</em>
+                      {formatDueLabel(task.dueDate, date)}
+                      {task.status === 'in_progress' ? ' · In progress' : ''}
+                    </small>
+                  </div>
+                  <button className="task-delete" type="button" aria-label={`Delete ${task.title}`} onClick={() => deleteTask(task.id)}><Trash2 size={14} /></button>
+                </li>
+              )
+            })}
+            {visibleTasks.length === 0 && <li className="dashboard-empty">Nothing in this view. Add a task or ask myai to plan one.</li>}
           </ul>
         </section>
 
@@ -164,7 +229,7 @@ export function StudyDashboard({ onOpenChat }: { onOpenChat: () => void }) {
       <section className="dashboard-panel timetable-panel">
         <div className="panel-heading timetable-heading">
           <div><span className="panel-icon timetable-icon"><BookOpen size={17} /></span><div><h2>Study timetable</h2><p>Give your goals a little space on the calendar.</p></div></div>
-          <span className="timetable-total"><Clock3 size={14} /> {data.sessions.length} planned</span>
+          <span className="timetable-total"><Clock3 size={14} /> {extras.sessions.length} planned</span>
         </div>
         <form className="session-form" onSubmit={addSession}>
           <label className="session-subject"><span>Subject or task</span><input aria-label="Subject or study task" placeholder="e.g. Biology: cell structure" value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={80} /></label>
@@ -175,20 +240,20 @@ export function StudyDashboard({ onOpenChat }: { onOpenChat: () => void }) {
         </form>
         <div className="week-schedule">
           {days.map((day) => {
-            const sessions = data.sessions.filter((session) => session.day === day).sort((a, b) => a.time.localeCompare(b.time))
+            const sessions = extras.sessions.filter((session) => session.day === day).sort((a, b) => a.time.localeCompare(b.time))
             return <div className={`schedule-day ${day === todayName ? 'schedule-today' : ''}`} key={day}>
               <div className="schedule-day-name">{day}<span>{day === todayName ? 'TODAY' : ''}</span></div>
               <div className="schedule-day-sessions">
                 {sessions.length ? sessions.map((session) => <div className="session-chip" key={session.id}>
                   <span className="session-time">{session.time}</span><strong>{session.subject}</strong><small>{session.duration} min</small>
-                  <button type="button" aria-label={`Remove ${session.subject} from ${day}`} onClick={() => setData((current) => ({ ...current, sessions: current.sessions.filter((item) => item.id !== session.id) }))}><Trash2 size={13} /></button>
+                  <button type="button" aria-label={`Remove ${session.subject} from ${day}`} onClick={() => setExtras((current) => ({ ...current, sessions: current.sessions.filter((item) => item.id !== session.id) }))}><Trash2 size={13} /></button>
                 </div>) : <span className="schedule-empty">A little room to breathe</span>}
               </div>
             </div>
           })}
         </div>
       </section>
-      <footer className="dashboard-footer">Your plans stay right here in this browser <span>·</span> Go at your own pace</footer>
+      <footer className="dashboard-footer">Tasks and chats stay in this browser <span>·</span> Ask myai to manage the list for you</footer>
     </section>
   )
 }

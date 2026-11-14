@@ -1,24 +1,34 @@
-import dotenv from 'dotenv'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import dotenv from 'dotenv'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+if (!process.env.VERCEL) {
+  const candidates = [
+    path.resolve(process.cwd(), 'backend/.env'),
+    path.resolve(process.cwd(), '.env'),
+  ]
+  for (const file of candidates) {
+    if (existsSync(file)) dotenv.config({ path: file, override: false })
+  }
+}
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') })
-dotenv.config()
+dotenv.config({ override: false })
 
 const defaultAiModel = 'gemini-3.8-flash'
 const legacyAiModel = 'gemini-2.5-flash'
 
 function normalizeAiModel(value: string | undefined): string {
-  const compact = value?.trim().toLowerCase().replace(/\s+/g, '-') ?? ''
+  const compact = value?.trim().replace(/^models\//i, '').toLowerCase().replace(/\s+/g, '-') ?? ''
   if (!compact) return defaultAiModel
-  if (compact === legacyAiModel) {
-    console.warn(`AI_MODEL=${legacyAiModel} is no longer available to new users; switching to ${defaultAiModel}.`)
+  if (compact === legacyAiModel || compact === 'gemini-2.0-flash' || compact === 'gemini-2.5-flash-lite') {
+    console.warn(`AI_MODEL=${compact} is no longer the default; switching to ${defaultAiModel}.`)
     return defaultAiModel
   }
   return compact
+}
+
+function readApiKey(): string {
+  return process.env.AI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim() || ''
 }
 
 type EnvConfig = {
@@ -32,7 +42,7 @@ const portValue = Number(process.env.PORT ?? '3001')
 
 export const env: EnvConfig = {
   port: Number.isFinite(portValue) && portValue > 0 ? portValue : 3001,
-  frontendUrl: process.env.FRONTEND_URL ?? 'https://ankii09.github.io',
-  aiApiKey: process.env.AI_API_KEY?.trim() ?? '',
+  frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+  aiApiKey: readApiKey(),
   aiModel: normalizeAiModel(process.env.AI_MODEL),
 }

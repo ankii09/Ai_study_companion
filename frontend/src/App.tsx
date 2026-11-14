@@ -1,39 +1,35 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, BookOpen, Check, ChevronDown, CircleHelp, Copy, Menu, Paperclip, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { ArrowUp, BookOpen, Check, CheckCircle2, ChevronDown, CircleHelp, Copy, Menu, Paperclip, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from './components/ui/button'
 import { Conversation, Sidebar } from './components/sidebar'
 import { defaultPreferences, Preferences, SettingsDialog } from './components/settings-dialog'
 import { sendChatMessage } from './lib/api'
-import type { ChatMessage } from './lib/chat-api'
+import { loadTasks, saveTasks } from './lib/tasks'
 import { StudyDashboard } from './components/study-dashboard'
+
+type ChatMessage = Conversation['messages'][number]
 
 const initialConversations: Conversation[] = [
   { id: 'welcome', title: 'A fresh start', group: 'Today', messages: [] },
-  { id: 'week-plan', title: 'A calmer weekly plan', group: 'Today', messages: [{ role: 'user', content: 'Help me make a calmer weekly plan.' }, { role: 'assistant', content: 'Absolutely. Start by choosing one priority for each day, then leave a little space between commitments. What does a typical week look like for you?' }] },
-  { id: 'writing', title: 'A note that sounds like me', group: 'Yesterday', messages: [{ role: 'user', content: 'Can you help me write a thoughtful thank-you note?' }, { role: 'assistant', content: 'Of course. Tell me who it is for and one detail you appreciated, and we can make it feel personal without overdoing it.' }] },
-  { id: 'ideas', title: 'Weekend reading list', group: 'Previous 7 Days', messages: [{ role: 'user', content: 'Suggest a few thoughtful books for the weekend.' }, { role: 'assistant', content: 'I can tailor a short list to your mood. Are you looking for fiction, ideas to think about, or something light?' }] },
 ]
 
 const suggestions = [
-  { title: 'Let\'s get creative', description: 'Turn your ideas into something beautiful.', emoji: '✨', prompt: 'Help me turn a rough idea into a polished concept for something I can actually use.', tone: 'rose' },
+  { title: 'Plan today\'s tasks', description: 'Turn a messy to-do pile into a clear list.', emoji: '✅', prompt: 'Look at my current tasks and help me plan today. Add anything important I mention, with due dates in YYYY-MM-DD if I give a day.', tone: 'rose' },
   { title: 'Learn something new', description: 'Explore a topic you\'ve always wondered about.', emoji: '🌷', prompt: 'Teach me something fascinating in a calm, beginner-friendly way.', tone: 'sage' },
-  { title: 'Code with me', description: 'Build, debug, and bring ideas to life.', emoji: '💻', prompt: 'Help me work through a technical problem step by step and explain the reasoning clearly.', tone: 'peach' },
+  { title: 'Break down a project', description: 'Split a big goal into accurate next steps.', emoji: '🧩', prompt: 'Help me break a project into concrete tasks. Ask what the project is, then add the tasks with priorities and due dates.', tone: 'peach' },
   { title: 'Plan a softer week', description: 'Organize your thoughts and find your rhythm.', emoji: '☁️', prompt: 'Help me plan a calmer, more intentional week with a realistic routine and priorities.', tone: 'lavender' },
 ]
 
 const markdownComponents = {
-  a: ({ node, ...props }: any) => <a {...props} target="_blank" rel="noreferrer" />,
-  h1: ({ node, ...props }: any) => <h1 {...props} />,
-  h2: ({ node, ...props }: any) => <h2 {...props} />,
-  h3: ({ node, ...props }: any) => <h3 {...props} />,
-  code: ({ inline, className, children, ...props }: any) => {
-    if (inline) {
-      return <code className={className} {...props}>{children}</code>
-    }
-    return <code className={className} {...props}>{children}</code>
-  },
+  a: (props: any) => <a {...props} target="_blank" rel="noreferrer" />,
+  h1: (props: any) => <h1 {...props} />,
+  h2: (props: any) => <h2 {...props} />,
+  h3: (props: any) => <h3 {...props} />,
+  code: ({ className, children, ...props }: any) => (
+    <code className={className} {...props}>{children}</code>
+  ),
 }
 
 function createId() {
@@ -43,7 +39,12 @@ function createId() {
 function readPreferences(): Preferences {
   try {
     const stored = localStorage.getItem('my-ai-preferences')
-    return stored ? { ...defaultPreferences, ...JSON.parse(stored) as Partial<Preferences> } : defaultPreferences
+    if (!stored) return defaultPreferences
+    const parsed = JSON.parse(stored) as Partial<Preferences>
+    return {
+      enterToSend: parsed.enterToSend ?? defaultPreferences.enterToSend,
+      conciseReplies: parsed.conciseReplies ?? defaultPreferences.conciseReplies,
+    }
   } catch {
     return defaultPreferences
   }
@@ -67,7 +68,6 @@ export default function App() {
     }
   })
   const [preferences, setPreferences] = useState(readPreferences)
-  const [apiKey, setApiKey] = useState('')
   const [draft, setDraft] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -94,7 +94,18 @@ export default function App() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [activeConversation?.messages.length, sending])
+  }, [activeConversation?.messages, sending])
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        startNewChat()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   function startNewChat() {
     const id = createId()
@@ -106,9 +117,8 @@ export default function App() {
     window.setTimeout(() => textareaRef.current?.focus(), 20)
   }
 
-  function savePreferences(next: Preferences, nextKey: string) {
+  function savePreferences(next: Preferences) {
     setPreferences(next)
-    setApiKey(nextKey || apiKey)
     localStorage.setItem('my-ai-preferences', JSON.stringify(next))
   }
 
@@ -131,19 +141,39 @@ export default function App() {
     abortRef.current = controller
 
     try {
-      await sendChatMessage(nextMessages, (chunk) => {
-        const delta = chunk.replace(/\r\n/g, '\n')
-        setConversations((current) => current.map((item) => {
-          if (item.id !== activeId) return item
-          const lastIndex = item.messages.length - 1
-          const lastMessage = item.messages[lastIndex]
-          if (!lastMessage || lastMessage.role !== 'assistant') return item
-          const nextContent = `${lastMessage.content}${delta}`
-          const updatedMessages = [...item.messages]
-          updatedMessages[lastIndex] = { ...lastMessage, content: nextContent }
-          return { ...item, messages: updatedMessages }
-        }))
-      }, controller.signal)
+      await sendChatMessage(
+        nextMessages
+          .filter((message) => message.content.trim().length > 0)
+          .map((message) => ({ role: message.role, content: message.content })),
+        {
+          onChunk: (chunk) => {
+            const delta = chunk.replace(/\r\n/g, '\n')
+            setConversations((current) => current.map((item) => {
+              if (item.id !== activeId) return item
+              const lastIndex = item.messages.length - 1
+              const lastMessage = item.messages[lastIndex]
+              if (!lastMessage || lastMessage.role !== 'assistant') return item
+              const updatedMessages = [...item.messages]
+              updatedMessages[lastIndex] = { ...lastMessage, content: `${lastMessage.content}${delta}` }
+              return { ...item, messages: updatedMessages }
+            }))
+          },
+          onTasks: (tasks) => {
+            saveTasks(tasks)
+            setConversations((current) => current.map((item) => {
+              if (item.id !== activeId) return item
+              const lastIndex = item.messages.length - 1
+              const lastMessage = item.messages[lastIndex]
+              if (!lastMessage || lastMessage.role !== 'assistant') return item
+              const updatedMessages = [...item.messages]
+              updatedMessages[lastIndex] = { ...lastMessage, taskUpdate: true }
+              return { ...item, messages: updatedMessages }
+            }))
+          },
+        },
+        controller.signal,
+        { tasks: loadTasks(), concise: preferences.conciseReplies },
+      )
     } catch (error) {
       if (controller.signal.aborted) return
       const message = error instanceof Error ? error.message : 'Something went wrong while connecting to the AI service.'
@@ -203,8 +233,8 @@ export default function App() {
             <Button className="mobile-menu" variant="ghost" size="icon" aria-label="Open conversation menu" onClick={() => setMobileOpen(true)}><Menu size={19} /></Button>
             <div className="model-picker">
               <span className="model-sparkle">{activeView === 'chat' ? <Sparkles size={14} /> : <BookOpen size={14} />}</span>
-              <span>{activeView === 'chat' ? 'myai' : 'Study nook'}</span>
-              {activeView === 'chat' && <span className="model-tag">PREVIEW</span>}
+              <span>{activeView === 'chat' ? 'myai' : 'Tasks & study'}</span>
+              {activeView === 'chat' && <span className="model-tag">LIVE</span>}
               <ChevronDown size={14} className="model-chevron" />
             </div>
           </div>
@@ -223,7 +253,7 @@ export default function App() {
               </div>
               <div className="welcome-kicker">your little corner of ideas</div>
               <h1>Little ideas, big possibilities.</h1>
-              <p className="welcome-subtitle">Your personal space to think, create, and figure things out.</p>
+              <p className="welcome-subtitle">Chat, plan tasks, and keep a study timetable in one private workspace.</p>
 
               <div className="suggestion-grid">
                 {suggestions.map(({ title, description, emoji, prompt, tone }, index) => (
@@ -260,16 +290,28 @@ export default function App() {
                     <div className="message-author">{message.role === 'user' ? 'You' : 'myai'}</div>
 
                     {message.role === 'assistant' ? (
-                      <div className="message-content markdown-body">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as any}>
-                          {message.content}
-                        </ReactMarkdown>
-                      </div>
+                      message.content ? (
+                        <div className="message-content markdown-body">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as any}>
+                            {message.content}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="typing-dots" aria-label="My AI is responding"><i /><i /><i /></div>
+                      )
                     ) : (
                       <div className="message-content plain-text">{message.content}</div>
                     )}
 
-                    {message.role === 'assistant' && (
+                    {message.role === 'assistant' && message.taskUpdate && (
+                      <button className="task-update-card" type="button" onClick={() => setActiveView('dashboard')}>
+                        <CheckCircle2 size={15} />
+                        <span>Task list updated</span>
+                        <small>Open tasks</small>
+                      </button>
+                    )}
+
+                    {message.role === 'assistant' && message.content && (
                       <div className="message-tools">
                         <button aria-label="Copy response" title="Copy response" onClick={() => void copyMessage(`${index}`, message.content)}>
                           {copied === `${index}` ? <Check size={14} /> : <Copy size={14} />}
@@ -281,13 +323,6 @@ export default function App() {
                   </div>
                 </article>
               ))}
-
-              {sending && (
-                <div className="message-row assistant-row">
-                  <div className="assistant-avatar"><Sparkles size={14} /></div>
-                  <div className="typing-dots" aria-label="My AI is responding"><i /><i /><i /></div>
-                </div>
-              )}
 
               {sending && (
                 <div className="composer-stop-row">
@@ -312,13 +347,13 @@ export default function App() {
               }}
               onKeyDown={handleComposerKeyDown}
               rows={1}
-              placeholder="What\'s on your mind today?"
+              placeholder="Ask anything, or tell me a task to add..."
               aria-label="Message My AI"
             />
             <div className="composer-controls">
               <div className="composer-left">
                 <Button variant="ghost" size="icon" aria-label="Attach file" title="Attachments coming soon" disabled><Paperclip size={16} /></Button>
-                <span className="composer-model-label"><span className="composer-dot" />{preferences.model || 'My AI'}</span>
+                <span className="composer-model-label"><span className="composer-dot" />Gemini</span>
               </div>
 
               <div className="composer-right">

@@ -1,5 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getCorsOrigin } from '../backend/src/config/origins.js'
+import { env } from '../backend/src/config/env.js'
+
+export const config = {
+  runtime: 'nodejs',
+}
 
 export default function handler(req: IncomingMessage, res: ServerResponse) {
   const origin = getCorsOrigin(req.headers.origin)
@@ -18,5 +23,9 @@ export default function handler(req: IncomingMessage, res: ServerResponse) {
 
   res.statusCode = 200
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
-  res.end(JSON.stringify({ status: 'ok', service: 'ai-backend' }))
+  res.end(JSON.stringify({
+    status: 'ok',
+    service: 'ai-backend',
+    aiConfigured: Boolean(env.aiApiKey),
+  }))
 }

@@ -1,18 +1,9 @@
 import type { NextFunction, Request, Response } from 'express'
-import { ZodError, z } from 'zod'
+import { ZodError } from 'zod'
+import { MAX_REQUEST_BYTES, chatRequestSchema } from './schema.js'
 
-const MAX_MESSAGES = 30
-const MAX_MESSAGE_LENGTH = 4000
-const MAX_REQUEST_BYTES = 1024 * 1024
-
-const messageSchema = z.object({
-  role: z.enum(['system', 'user', 'assistant']),
-  content: z.string().trim().min(1).max(MAX_MESSAGE_LENGTH),
-})
-
-export const chatRequestSchema = z.object({
-  messages: z.array(messageSchema).min(1).max(MAX_MESSAGES),
-}).strict()
+export { chatRequestSchema } from './schema.js'
+export type { ParsedChatRequest } from './schema.js'
 
 export function validateChatRequest(req: Request, res: Response, next: NextFunction) {
   const contentLength = Number(req.headers['content-length'] ?? 0)
@@ -21,8 +12,7 @@ export function validateChatRequest(req: Request, res: Response, next: NextFunct
   }
 
   try {
-    const result = chatRequestSchema.parse(req.body)
-    req.body = result
+    req.body = chatRequestSchema.parse(req.body)
     next()
   } catch (error) {
     if (error instanceof ZodError) {

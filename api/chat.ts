@@ -1,9 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { chatRequestSchema } from '../backend/src/middleware/validate.js'
+import { chatRequestSchema } from '../backend/src/middleware/schema.js'
 import { getCorsOrigin } from '../backend/src/config/origins.js'
 import { AiServiceError, generateChatResponse } from '../backend/src/services/ai.js'
 
 export const config = {
+  runtime: 'nodejs',
   maxDuration: 60,
 }
 
@@ -87,14 +88,19 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     }))
     let streamed = false
 
-    for await (const chunk of generateChatResponse(sanitizedMessages, abortController.signal)) {
+    for await (const event of generateChatResponse(sanitizedMessages, abortController.signal, {
+      tasks: parsed.data.tasks,
+      context: parsed.data.context,
+    })) {
       if (!streamed) {
         res.statusCode = 200
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+        res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
         res.setHeader('Cache-Control', 'no-cache, no-transform')
         streamed = true
       }
-      res.write(chunk)
+      res.write(`${JSON.stringify(event)}\n`)
+      const flush = (res as ServerResponse & { flush?: () => void }).flush
+      if (typeof flush === 'function') flush()
     }
 
     if (!streamed) {
@@ -113,7 +119,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const message = error instanceof AiServiceError ? error.message : 'Something went wrong. Please try again.'
 
     if (res.headersSent) {
-      res.end(`\n\n${message}`)
+      res.end(`${JSON.stringify({ type: 'text', delta: `\n\n${message}` })}\n`)
       return
     }
 

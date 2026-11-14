@@ -6,7 +6,7 @@ export type Conversation = {
   id: string
   title: string
   group: 'Today' | 'Yesterday' | 'Previous 7 Days'
-  messages: { role: 'user' | 'assistant'; content: string }[]
+  messages: { role: 'user' | 'assistant'; content: string; taskUpdate?: boolean }[]
 }
 
 type SidebarProps = {
@@ -46,7 +46,7 @@ export function Sidebar({ conversations, activeId, activeView, mobileOpen, onVie
         <Button className="new-chat-button" variant="secondary" onClick={onNew}><Plus size={16} /><span>New chat</span><span className="new-shortcut">⌘ K</span></Button>
 
         <nav className="workspace-nav" aria-label="Workspace">
-          <button type="button" className={activeView === 'dashboard' ? 'workspace-nav-active' : ''} onClick={() => { onViewChange('dashboard'); onClose() }}><CalendarDays size={16} /><span>Study dashboard</span></button>
+          <button type="button" className={activeView === 'dashboard' ? 'workspace-nav-active' : ''} onClick={() => { onViewChange('dashboard'); onClose() }}><CalendarDays size={16} /><span>Tasks & study</span></button>
           <button type="button" className={activeView === 'chat' ? 'workspace-nav-active' : ''} onClick={() => { onViewChange('chat'); onClose() }}><Sparkles size={16} /><span>AI chat</span></button>
         </nav>
 

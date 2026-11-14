@@ -1,3 +1,5 @@
+import type { ChatContext, Task } from './tasks.js'
+
 export type ChatRole = 'system' | 'user' | 'assistant'
 
 export type ChatMessage = {
@@ -7,6 +9,8 @@ export type ChatMessage = {
 
 export type ChatRequest = {
   messages: ChatMessage[]
+  tasks?: Task[]
+  context?: ChatContext
 }
 
 export type ChatResponse = {
